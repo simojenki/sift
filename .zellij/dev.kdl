@@ -1,0 +1,19 @@
+layout {
+    pane split_direction="vertical" {
+        pane size="40%" {
+            name "diff"
+            command "lazygit"
+        }
+        pane split_direction="horizontal" {
+            pane {
+                name "agent"
+                command "claude"
+                args "--dangerously-skip-permissions"
+            }
+            pane size="30%" {
+                name "shell"
+                command "bash"
+            }
+        }
+    }
+}
