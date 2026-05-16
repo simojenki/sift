@@ -1,6 +1,12 @@
 IMAGE_NAME := sift-dev
 
-.PHONY: dev-image dev dev-ui
+.PHONY: dev-image dev dev-ui test lint
+
+test:
+	python -m pytest tests/
+
+lint:
+	ruff check src/
 
 dev-image:
 	podman build -t $(IMAGE_NAME) .
