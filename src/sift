@@ -4,6 +4,7 @@ import datetime
 import hashlib
 import shutil
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,12 +44,13 @@ class SiftRecords:
             self._conn.commit()
         return self._conn
 
-    def contains(self, hash: str) -> bool:
+    def get(self, hash: str) -> SiftRecord | None:
         if not self._db_path.exists():
-            return False
-        return self._get_conn().execute(
-            "SELECT 1 FROM hashes WHERE hash = ?", (hash,)
-        ).fetchone() is not None
+            return None
+        row = self._get_conn().execute(
+            "SELECT hash, filename, first_seen FROM hashes WHERE hash = ?", (hash,)
+        ).fetchone()
+        return SiftRecord(hash=row[0], filename=row[1], first_seen=row[2]) if row else None
 
     def insert(self, record: SiftRecord) -> None:
         conn = self._get_conn()
@@ -74,15 +76,18 @@ def discover_files(src: Path) -> list[Path]:
     return [p for p in src.rglob("*") if p.is_file()]
 
 
-def move_files(src: Path, dest: Path) -> None:
+def move_files(src: Path, dest: Path, log: Callable[[str], None] = lambda _: None) -> None:
     with SiftRecords(dest) as store:
         for file in discover_files(src):
             relative = file.relative_to(src)
             target = dest / relative
             if target.exists():
+                log(f"! {file.name}")
                 continue
             h = hash_file(file)
-            if store.contains(h):
+            existing = store.get(h)
+            if existing is not None:
+                log(f"!! {file.name} ({h} {existing.filename} @ {existing.first_seen})")
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(file), str(target))
@@ -91,14 +96,17 @@ def move_files(src: Path, dest: Path) -> None:
                 filename=file.name,
                 first_seen=datetime.datetime.now(datetime.UTC).isoformat(),
             ))
+            log(f"+ {file.name}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Move files from src to dest, skipping existing files.")
     parser.add_argument("src", help="Source directory")
     parser.add_argument("dest", help="Destination directory")
+    parser.add_argument("-v", action="store_true", help="Verbose output")
     args = parser.parse_args()
-    move_files(Path(args.src), Path(args.dest))
+    log = print if args.v else lambda _: None
+    move_files(Path(args.src), Path(args.dest), log=log)
 
 
 if __name__ == "__main__":

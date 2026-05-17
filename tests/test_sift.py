@@ -4,6 +4,7 @@ from pathlib import Path
 
 from sift import SiftRecord, SiftRecords, discover_files, hash_file, move_files
 
+
 SIFT = Path(__file__).parent.parent / "src" / "sift"
 
 
@@ -41,25 +42,22 @@ def test_hash_file_empty(tmp_path):
     assert hash_file(f) == EMPTY_SHA256
 
 
-def test_sift_records_contains_missing_db(tmp_path):
+def test_sift_records_get_missing_db(tmp_path):
     store = SiftRecords(tmp_path)
-    assert not store.contains("abc123")
+    assert store.get("abc123") is None
 
 
-def test_sift_records_insert_then_contains(tmp_path):
+def test_sift_records_insert_then_get(tmp_path):
+    record = SiftRecord(hash="abc123", filename="file.txt", first_seen="2026-01-01T00:00:00+00:00")
     with SiftRecords(tmp_path) as store:
-        record = SiftRecord(hash="abc123", filename="file.txt", first_seen="2026-01-01T00:00:00+00:00")
         store.insert(record)
-        assert store.contains("abc123")
+        assert store.get("abc123") == record
 
 
-def test_sift_records_multiple_inserts(tmp_path):
+def test_sift_records_get_unknown_hash(tmp_path):
     with SiftRecords(tmp_path) as store:
         store.insert(SiftRecord(hash="aaa", filename="a.txt", first_seen="2026-01-01T00:00:00+00:00"))
-        store.insert(SiftRecord(hash="bbb", filename="b.txt", first_seen="2026-01-02T00:00:00+00:00"))
-        assert store.contains("aaa")
-        assert store.contains("bbb")
-        assert not store.contains("ccc")
+        assert store.get("bbb") is None
 
 
 def test_sift_records_duplicate_insert_no_error(tmp_path):
@@ -188,3 +186,47 @@ def test_hash_persists_across_runs(tmp_path):
     (src2 / "copy.txt").write_text("unique content")
     move_files(src2, dest)
     assert (src2 / "copy.txt").exists()
+
+
+def test_log_move(tmp_path):
+    src, dest = tmp_path / "src", tmp_path / "dest"
+    src.mkdir(); dest.mkdir()
+    (src / "file.txt").write_text("hello")
+    messages = []
+    move_files(src, dest, log=messages.append)
+    assert messages == ["+ file.txt"]
+
+
+def test_log_existing_path(tmp_path):
+    src, dest = tmp_path / "src", tmp_path / "dest"
+    src.mkdir(); dest.mkdir()
+    (src / "file.txt").write_text("new")
+    (dest / "file.txt").write_text("original")
+    messages = []
+    move_files(src, dest, log=messages.append)
+    assert messages == ["! file.txt"]
+
+
+def test_log_duplicate_hash(tmp_path):
+    src1, src2, dest = tmp_path / "src1", tmp_path / "src2", tmp_path / "dest"
+    src1.mkdir(); src2.mkdir(); dest.mkdir()
+    (src1 / "a.txt").write_text("same")
+    (src2 / "b.txt").write_text("same")
+    move_files(src1, dest)
+    messages = []
+    move_files(src2, dest, log=messages.append)
+    assert len(messages) == 1
+    assert messages[0].startswith("!! b.txt (")
+    assert "a.txt" in messages[0]
+
+
+def test_log_silent_by_default(tmp_path):
+    src, dest = tmp_path / "src", tmp_path / "dest"
+    src.mkdir(); dest.mkdir()
+    (src / "file.txt").write_text("hello")
+    import io, sys
+    captured = io.StringIO()
+    sys.stdout = captured
+    move_files(src, dest)
+    sys.stdout = sys.__stdout__
+    assert captured.getvalue() == ""
