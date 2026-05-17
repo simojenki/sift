@@ -2,7 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from sift import discover_files, hash_file, load_hashes, move_files, save_hashes
+from sift import SiftRecord, SiftRecords, discover_files, hash_file, move_files
 
 SIFT = Path(__file__).parent.parent / "src" / "sift"
 
@@ -41,23 +41,32 @@ def test_hash_file_empty(tmp_path):
     assert hash_file(f) == EMPTY_SHA256
 
 
-def test_load_hashes_missing_file(tmp_path):
-    assert load_hashes(tmp_path) == {}
+def test_sift_records_contains_missing_db(tmp_path):
+    store = SiftRecords(tmp_path)
+    assert not store.contains("abc123")
 
 
-def test_save_load_round_trip(tmp_path):
-    hashes = {"abc123": ("file.txt", "2026-01-01T00:00:00+00:00")}
-    save_hashes(tmp_path, hashes)
-    assert load_hashes(tmp_path) == hashes
+def test_sift_records_insert_then_contains(tmp_path):
+    with SiftRecords(tmp_path) as store:
+        record = SiftRecord(hash="abc123", filename="file.txt", first_seen="2026-01-01T00:00:00+00:00")
+        store.insert(record)
+        assert store.contains("abc123")
 
 
-def test_save_load_multiple_entries(tmp_path):
-    hashes = {
-        "aaa": ("a.txt", "2026-01-01T00:00:00+00:00"),
-        "bbb": ("b.txt", "2026-01-02T00:00:00+00:00"),
-    }
-    save_hashes(tmp_path, hashes)
-    assert load_hashes(tmp_path) == hashes
+def test_sift_records_multiple_inserts(tmp_path):
+    with SiftRecords(tmp_path) as store:
+        store.insert(SiftRecord(hash="aaa", filename="a.txt", first_seen="2026-01-01T00:00:00+00:00"))
+        store.insert(SiftRecord(hash="bbb", filename="b.txt", first_seen="2026-01-02T00:00:00+00:00"))
+        assert store.contains("aaa")
+        assert store.contains("bbb")
+        assert not store.contains("ccc")
+
+
+def test_sift_records_duplicate_insert_no_error(tmp_path):
+    with SiftRecords(tmp_path) as store:
+        record = SiftRecord(hash="abc123", filename="file.txt", first_seen="2026-01-01T00:00:00+00:00")
+        store.insert(record)
+        store.insert(record)
 
 
 def test_discover_empty_dir(tmp_path):
@@ -155,7 +164,7 @@ def test_hash_file_created_after_move(tmp_path):
     dest.mkdir()
     (src / "file.txt").write_text("content")
     move_files(src, dest)
-    assert (dest / ".sift.hashes").exists()
+    assert (dest / ".sift.db").exists()
 
 
 def test_hash_file_not_created_when_nothing_moved(tmp_path):
@@ -164,7 +173,7 @@ def test_hash_file_not_created_when_nothing_moved(tmp_path):
     src.mkdir()
     dest.mkdir()
     move_files(src, dest)
-    assert not (dest / ".sift.hashes").exists()
+    assert not (dest / ".sift.db").exists()
 
 
 def test_hash_persists_across_runs(tmp_path):

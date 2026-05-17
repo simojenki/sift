@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 import argparse
-import csv
 import datetime
 import hashlib
 import shutil
+import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
-HASH_FILE = ".sift.hashes"
+DB_FILE = ".sift.db"
+
+
+@dataclass
+class SiftRecord:
+    hash: str
+    filename: str
+    first_seen: str
 
 
 def hash_file(path: Path) -> str:
@@ -17,19 +25,49 @@ def hash_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def load_hashes(dest: Path) -> dict[str, tuple[str, str]]:
-    p = dest / HASH_FILE
-    if not p.exists():
-        return {}
-    with p.open(newline="") as f:
-        return {row[0]: (row[1], row[2]) for row in csv.reader(f, delimiter="\t")}
+class SiftRecords:
+    def __init__(self, dest: Path) -> None:
+        self._db_path = dest / DB_FILE
+        self._conn: sqlite3.Connection | None = None
 
+    def _get_conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            self._conn = sqlite3.connect(self._db_path)
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS hashes (
+                    hash       TEXT PRIMARY KEY,
+                    filename   TEXT NOT NULL,
+                    first_seen TEXT NOT NULL
+                )
+            """)
+            self._conn.commit()
+        return self._conn
 
-def save_hashes(dest: Path, hashes: dict[str, tuple[str, str]]) -> None:
-    with (dest / HASH_FILE).open("w", newline="") as f:
-        w = csv.writer(f, delimiter="\t")
-        for hex_, (name, ts) in hashes.items():
-            w.writerow([hex_, name, ts])
+    def contains(self, hash: str) -> bool:
+        if not self._db_path.exists():
+            return False
+        return self._get_conn().execute(
+            "SELECT 1 FROM hashes WHERE hash = ?", (hash,)
+        ).fetchone() is not None
+
+    def insert(self, record: SiftRecord) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT OR IGNORE INTO hashes (hash, filename, first_seen) VALUES (?, ?, ?)",
+            (record.hash, record.filename, record.first_seen),
+        )
+        conn.commit()
+
+    def close(self) -> None:
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+    def __enter__(self) -> "SiftRecords":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
 
 
 def discover_files(src: Path) -> list[Path]:
@@ -37,22 +75,22 @@ def discover_files(src: Path) -> list[Path]:
 
 
 def move_files(src: Path, dest: Path) -> None:
-    hashes = load_hashes(dest)
-    changed = False
-    for file in discover_files(src):
-        relative = file.relative_to(src)
-        target = dest / relative
-        if target.exists():
-            continue
-        h = hash_file(file)
-        if h in hashes:
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(file), str(target))
-        hashes[h] = (file.name, datetime.datetime.now(datetime.UTC).isoformat())
-        changed = True
-    if changed:
-        save_hashes(dest, hashes)
+    with SiftRecords(dest) as store:
+        for file in discover_files(src):
+            relative = file.relative_to(src)
+            target = dest / relative
+            if target.exists():
+                continue
+            h = hash_file(file)
+            if store.contains(h):
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(file), str(target))
+            store.insert(SiftRecord(
+                hash=h,
+                filename=file.name,
+                first_seen=datetime.datetime.now(datetime.UTC).isoformat(),
+            ))
 
 
 def main():
