@@ -220,6 +220,20 @@ def test_log_duplicate_hash(tmp_path):
     assert "a.txt" in messages[0]
 
 
+def test_concurrent_workers_correct(tmp_path):
+    src, dest = tmp_path / "src", tmp_path / "dest"
+    src.mkdir(); dest.mkdir()
+    for i in range(6):
+        (src / f"file{i}.txt").write_text(f"content {i}")
+    (src / "dup.txt").write_text("content 0")
+    messages = []
+    move_files(src, dest, log=messages.append, workers=3)
+    moved = [m for m in messages if m.startswith("+")]
+    skipped_hash = [m for m in messages if m.startswith("!!")]
+    assert len(moved) == 6
+    assert len(skipped_hash) == 1
+
+
 def test_log_silent_by_default(tmp_path):
     src, dest = tmp_path / "src", tmp_path / "dest"
     src.mkdir(); dest.mkdir()

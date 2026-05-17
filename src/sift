@@ -5,6 +5,7 @@ import hashlib
 import shutil
 import sqlite3
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -76,27 +77,34 @@ def discover_files(src: Path) -> list[Path]:
     return [p for p in src.rglob("*") if p.is_file()]
 
 
-def move_files(src: Path, dest: Path, log: Callable[[str], None] = lambda _: None) -> None:
+def move_files(src: Path, dest: Path, log: Callable[[str], None] = lambda _: None, workers: int = 1) -> None:
     with SiftRecords(dest) as store:
+        candidates: list[tuple[Path, Path]] = []
         for file in discover_files(src):
-            relative = file.relative_to(src)
-            target = dest / relative
+            target = dest / file.relative_to(src)
             if target.exists():
                 log(f"! {file.name}")
                 continue
-            h = hash_file(file)
-            existing = store.get(h)
-            if existing is not None:
-                log(f"!! {file.name} ({h} {existing.filename} @ {existing.first_seen})")
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(file), str(target))
-            store.insert(SiftRecord(
-                hash=h,
-                filename=file.name,
-                first_seen=datetime.datetime.now(datetime.UTC).isoformat(),
-            ))
-            log(f"+ {file.name}")
+            candidates.append((file, target))
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(hash_file, file): (file, target)
+                       for file, target in candidates}
+            for future in as_completed(futures):
+                file, target = futures[future]
+                h = future.result()
+                existing = store.get(h)
+                if existing is not None:
+                    log(f"!! {file.name} ({h} {existing.filename} @ {existing.first_seen})")
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(file), str(target))
+                store.insert(SiftRecord(
+                    hash=h,
+                    filename=file.name,
+                    first_seen=datetime.datetime.now(datetime.UTC).isoformat(),
+                ))
+                log(f"+ {file.name}")
 
 
 def main():
@@ -104,9 +112,10 @@ def main():
     parser.add_argument("src", help="Source directory")
     parser.add_argument("dest", help="Destination directory")
     parser.add_argument("-v", action="store_true", help="Verbose output")
+    parser.add_argument("-j", type=int, default=1, metavar="N", help="Number of hash workers (default: 1)")
     args = parser.parse_args()
     log = print if args.v else lambda _: None
-    move_files(Path(args.src), Path(args.dest), log=log)
+    move_files(Path(args.src), Path(args.dest), log=log, workers=args.j)
 
 
 if __name__ == "__main__":
