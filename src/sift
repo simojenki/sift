@@ -1,7 +1,35 @@
 #!/usr/bin/env python3
 import argparse
+import csv
+import datetime
+import hashlib
 import shutil
 from pathlib import Path
+
+HASH_FILE = ".sift.hashes"
+
+
+def hash_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def load_hashes(dest: Path) -> dict[str, tuple[str, str]]:
+    p = dest / HASH_FILE
+    if not p.exists():
+        return {}
+    with p.open(newline="") as f:
+        return {row[0]: (row[1], row[2]) for row in csv.reader(f, delimiter="\t")}
+
+
+def save_hashes(dest: Path, hashes: dict[str, tuple[str, str]]) -> None:
+    with (dest / HASH_FILE).open("w", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        for hex_, (name, ts) in hashes.items():
+            w.writerow([hex_, name, ts])
 
 
 def discover_files(src: Path) -> list[Path]:
@@ -9,13 +37,22 @@ def discover_files(src: Path) -> list[Path]:
 
 
 def move_files(src: Path, dest: Path) -> None:
+    hashes = load_hashes(dest)
+    changed = False
     for file in discover_files(src):
         relative = file.relative_to(src)
         target = dest / relative
         if target.exists():
             continue
+        h = hash_file(file)
+        if h in hashes:
+            continue
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(file), str(target))
+        hashes[h] = (file.name, datetime.datetime.now(datetime.UTC).isoformat())
+        changed = True
+    if changed:
+        save_hashes(dest, hashes)
 
 
 def main():

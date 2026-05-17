@@ -2,7 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from sift import discover_files, move_files
+from sift import discover_files, hash_file, load_hashes, move_files, save_hashes
 
 SIFT = Path(__file__).parent.parent / "src" / "sift"
 
@@ -14,6 +14,50 @@ def test_smoke(tmp_path):
     dest.mkdir()
     result = subprocess.run([sys.executable, SIFT, str(src), str(dest)])
     assert result.returncode == 0
+
+
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+def test_hash_file_same_content(tmp_path):
+    a = tmp_path / "a.txt"
+    b = tmp_path / "b.txt"
+    a.write_text("hello")
+    b.write_text("hello")
+    assert hash_file(a) == hash_file(b)
+
+
+def test_hash_file_different_content(tmp_path):
+    a = tmp_path / "a.txt"
+    b = tmp_path / "b.txt"
+    a.write_text("hello")
+    b.write_text("world")
+    assert hash_file(a) != hash_file(b)
+
+
+def test_hash_file_empty(tmp_path):
+    f = tmp_path / "empty.txt"
+    f.write_bytes(b"")
+    assert hash_file(f) == EMPTY_SHA256
+
+
+def test_load_hashes_missing_file(tmp_path):
+    assert load_hashes(tmp_path) == {}
+
+
+def test_save_load_round_trip(tmp_path):
+    hashes = {"abc123": ("file.txt", "2026-01-01T00:00:00+00:00")}
+    save_hashes(tmp_path, hashes)
+    assert load_hashes(tmp_path) == hashes
+
+
+def test_save_load_multiple_entries(tmp_path):
+    hashes = {
+        "aaa": ("a.txt", "2026-01-01T00:00:00+00:00"),
+        "bbb": ("b.txt", "2026-01-02T00:00:00+00:00"),
+    }
+    save_hashes(tmp_path, hashes)
+    assert load_hashes(tmp_path) == hashes
 
 
 def test_discover_empty_dir(tmp_path):
@@ -87,3 +131,51 @@ def test_skip_existing_moves_others(tmp_path):
     assert (src / "kept.txt").exists()
     assert (dest / "moved.txt").read_text() == "move me"
     assert not (src / "moved.txt").exists()
+
+
+def test_skip_duplicate_content_different_path(tmp_path):
+    src1 = tmp_path / "src1"
+    src2 = tmp_path / "src2"
+    dest = tmp_path / "dest"
+    src1.mkdir()
+    src2.mkdir()
+    dest.mkdir()
+    (src1 / "a.txt").write_text("same content")
+    (src2 / "b.txt").write_text("same content")
+    move_files(src1, dest)
+    move_files(src2, dest)
+    assert (dest / "a.txt").exists()
+    assert (src2 / "b.txt").exists()
+
+
+def test_hash_file_created_after_move(tmp_path):
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    src.mkdir()
+    dest.mkdir()
+    (src / "file.txt").write_text("content")
+    move_files(src, dest)
+    assert (dest / ".sift.hashes").exists()
+
+
+def test_hash_file_not_created_when_nothing_moved(tmp_path):
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    src.mkdir()
+    dest.mkdir()
+    move_files(src, dest)
+    assert not (dest / ".sift.hashes").exists()
+
+
+def test_hash_persists_across_runs(tmp_path):
+    src1 = tmp_path / "src1"
+    src2 = tmp_path / "src2"
+    dest = tmp_path / "dest"
+    src1.mkdir()
+    src2.mkdir()
+    dest.mkdir()
+    (src1 / "original.txt").write_text("unique content")
+    move_files(src1, dest)
+    (src2 / "copy.txt").write_text("unique content")
+    move_files(src2, dest)
+    assert (src2 / "copy.txt").exists()
