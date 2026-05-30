@@ -6,7 +6,7 @@ test:
 	python -m pytest tests/
 
 lint:
-	ruff check src/
+	ruff check src/sift tests/
 
 dev-image:
 	podman build -t $(IMAGE_NAME) .

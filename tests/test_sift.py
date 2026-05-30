@@ -190,7 +190,8 @@ def test_hash_persists_across_runs(tmp_path):
 
 def test_log_move(tmp_path):
     src, dest = tmp_path / "src", tmp_path / "dest"
-    src.mkdir(); dest.mkdir()
+    src.mkdir()
+    dest.mkdir()
     (src / "file.txt").write_text("hello")
     messages = []
     move_files(src, dest, log=messages.append)
@@ -199,7 +200,8 @@ def test_log_move(tmp_path):
 
 def test_log_existing_path(tmp_path):
     src, dest = tmp_path / "src", tmp_path / "dest"
-    src.mkdir(); dest.mkdir()
+    src.mkdir()
+    dest.mkdir()
     (src / "file.txt").write_text("new")
     (dest / "file.txt").write_text("original")
     messages = []
@@ -209,7 +211,9 @@ def test_log_existing_path(tmp_path):
 
 def test_log_duplicate_hash(tmp_path):
     src1, src2, dest = tmp_path / "src1", tmp_path / "src2", tmp_path / "dest"
-    src1.mkdir(); src2.mkdir(); dest.mkdir()
+    src1.mkdir()
+    src2.mkdir()
+    dest.mkdir()
     (src1 / "a.txt").write_text("same")
     (src2 / "b.txt").write_text("same")
     move_files(src1, dest)
@@ -222,7 +226,8 @@ def test_log_duplicate_hash(tmp_path):
 
 def test_concurrent_workers_correct(tmp_path):
     src, dest = tmp_path / "src", tmp_path / "dest"
-    src.mkdir(); dest.mkdir()
+    src.mkdir()
+    dest.mkdir()
     for i in range(6):
         (src / f"file{i}.txt").write_text(f"content {i}")
     (src / "dup.txt").write_text("content 0")
@@ -235,10 +240,13 @@ def test_concurrent_workers_correct(tmp_path):
 
 
 def test_log_silent_by_default(tmp_path):
+    import io
+    import sys
+
     src, dest = tmp_path / "src", tmp_path / "dest"
-    src.mkdir(); dest.mkdir()
+    src.mkdir()
+    dest.mkdir()
     (src / "file.txt").write_text("hello")
-    import io, sys
     captured = io.StringIO()
     sys.stdout = captured
     move_files(src, dest)

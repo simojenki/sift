@@ -32,5 +32,8 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
     && tar -xf /tmp/zellij.tar.gz -C /usr/local/bin zellij \
     && rm /tmp/zellij.tar.gz
 
+# ruff
+RUN pip install --no-cache-dir ruff
+
 USER vscode
 WORKDIR /workspace
